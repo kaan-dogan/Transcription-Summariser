@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Transcript Extractor",
+  "version": "1.0",
+  "description": "Extracts transcript text from Echo360 lectures",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.echo360.org.uk/*",
+    "https://api.openai.com/*"
+  ],
+  "action": {},
+  "background": {
+    "service_worker": "background.js"
+  }
+} 
