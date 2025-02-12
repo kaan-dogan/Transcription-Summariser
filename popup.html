@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Transcript Extractor</title>
+  <script src="libs/marked.min.js"></script>
+  <style>
+    body {
+      width: 250px;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      margin: 0;
+      background: #f8f9fa;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h2 {
+      font-size: 14px;
+      color: #1a73e8;
+      margin: 0 0 12px 0;
+      font-weight: 500;
+    }
+    .format-options {
+      margin-bottom: 16px;
+      border-bottom: 1px solid #e0e0e0;
+      padding-bottom: 12px;
+    }
+    .format-option {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-radius: 4px;
+    }
+    .format-option:hover {
+      background: #f1f3f4;
+      padding-left: 8px;
+    }
+    .format-option input {
+      margin-right: 10px;
+      cursor: pointer;
+    }
+    .format-option span {
+      font-size: 13px;
+      color: #3c4043;
+    }
+    .format-option .ext {
+      color: #5f6368;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #1557b0;
+    }
+    button:disabled {
+      background: #dadce0;
+      cursor: not-allowed;
+    }
+    #status {
+      color: #5f6368;
+      font-size: 12px;
+      margin-top: 12px;
+      text-align: center;
+      min-height: 16px;
+    }
+    .status.error {
+      color: #d93025;
+    }
+    .status.success {
+      color: #188038;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Output Format</h2>
+    <div class="format-options">
+      <label class="format-option">
+        <input type="radio" name="format" value="pdf" checked>
+        <span>PDF Document<span class="ext">.pdf</span></span>
+      </label>
+      <label class="format-option">
+        <input type="radio" name="format" value="txt">
+        <span>Text File<span class="ext">.txt</span></span>
+      </label>
+      <label class="format-option">
+        <input type="radio" name="format" value="md">
+        <span>Markdown<span class="ext">.md</span></span>
+      </label>
+    </div>
+    <button id="generate">Generate Notes</button>
+    <div id="status"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html> 

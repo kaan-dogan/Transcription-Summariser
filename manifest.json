@@ -11,7 +11,9 @@
     "*://*.echo360.org.uk/*",
     "https://api.openai.com/*"
   ],
-  "action": {},
+  "action": {
+    "default_popup": "popup.html"
+  },
   "background": {
     "service_worker": "background.js"
   }
