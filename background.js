@@ -1,42 +1,38 @@
-chrome.action.onClicked.addListener((tab) => {
-  // First inject config.js
-  chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ['config.js']
-  }).then(() => {
-    // Then inject content.js after config is loaded
+// Remove the click listener since we're using popup now
+chrome.runtime.onMessage.addListener((request, sender, callback) => {
+  if (request.action === 'generateNotes') {
+    console.log('Background: Received generateNotes request');
+    
+    // Get the tab ID from the request
+    const tabId = request.tabId;
+    
+    // First inject config.js
     chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content.js']
+      target: { tabId: tabId },
+      files: ['config.js']
+    }).then(() => {
+      console.log('Background: Config script injected');
+      // Then inject content.js
+      return chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['content.js']
+      });
+    }).then(() => {
+      console.log('Background: Content script injected');
+      // After scripts are injected, send the format and dev mode
+      return chrome.tabs.sendMessage(tabId, {
+        action: 'generateNotes',
+        format: request.format,
+        devMode: request.devMode
+      });
+    }).catch(error => {
+      console.error('Background: Script injection failed:', error);
     });
-  });
+  }
+  return true; // Keep the message channel open for async response
 });
 
-function extractTranscript() {
-  // Click the transcript button
-  const transcriptButton = document.querySelector('a.transcript.classroomLink');
-  if (transcriptButton) {
-    transcriptButton.click();
-    
-    // Wait for the transcript panel to load
-    setTimeout(() => {
-      const transcriptLines = document.querySelectorAll('[id*="r59baf1cf-9689-437a-903c-5cd64dd66aef"] div.transcriptLine');
-      let extractedText = '';
-      
-      transcriptLines.forEach(line => {
-        extractedText += line.textContent.trim() + '\n';
-      });
+// Log when background script loads
+console.log('Background script loaded');
 
-      // Create a download with the extracted text
-      const blob = new Blob([extractedText], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'transcript.txt';
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 2000); // Wait 2 seconds for the panel to load
-  } else {
-    console.error('Transcript button not found');
-  }
-} 
+// Remove the extractTranscript function as it's now handled in content.js 

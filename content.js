@@ -1,6 +1,7 @@
 // This file can be empty for now, but we might need it later for more complex interactions 
 
 (function() {
+  console.log('Content script starting execution');
   // Helper functions first
   function downloadFile(content, filename, type) {
     const blob = new Blob([content], { type: type });
@@ -23,6 +24,7 @@
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'generateNotes') {
       window.downloadFormat = request.format;
+      window.devMode = request.devMode;
     }
   });
 
@@ -30,37 +32,25 @@
   const transcriptButton = document.querySelector('a.transcript');
   
   if (transcriptButton) {
-    console.log('Processing lecture transcript...');
-    
-    // Check if transcript panel is already open
-    const transcriptPanel = document.querySelector('.transcript-panel');
-    if (!transcriptPanel || !transcriptPanel.offsetParent) {
-      // Only click if panel is not visible
-      transcriptButton.click();
-    }
-    
-    // Wait 1 second then get transcript
-    setTimeout(() => {
-      const transcriptPanel = document.querySelector('.transcript-panel');
-      if (transcriptPanel) {
-        const transcriptLines = transcriptPanel.querySelectorAll('.transcript-cues p span');
-        
-        let fullText = '';
-        transcriptLines.forEach((line) => {
-          const text = line.textContent.trim();
-          if (text) {
-            fullText += text + ' ';
-          }
-        });
+    // Check if transcript panel is visible using XPath
+    const transcriptPanel = document.evaluate(
+      '/html/body/div[1]/div[2]/div/div/div/div[1]/div/div/div/div/div[4]/div[2]',
+      document,
+      null,
+      XPathResult.FIRST_ORDERED_NODE_TYPE,
+      null
+    ).singleNodeValue;
 
-        fullText = fullText.trim();
-        getSummaryWithRetry(fullText, 1, 5000);
-      } else {
-        console.error('Transcript panel not found');
-      }
-    }, 1000);
+    if (transcriptPanel && window.getComputedStyle(transcriptPanel).display !== 'none') {
+      console.log('✅ TEST PASSED: Panel is visible, extracting transcript...');
+      processTranscript();
+    } else {
+      console.log('Opening transcript panel...');
+      transcriptButton.click();
+      setTimeout(processTranscript, 1500);
+    }
   } else {
-    console.error('Transcript button not found - Please make sure you are on a lecture page with transcripts enabled');
+    console.error('❌ TEST FAILED: Transcript button not found');
   }
 
   async function delay(ms) {
@@ -122,6 +112,42 @@
     const delayMs = baseDelay * attempt;
 
     try {
+      if (window.devMode) {
+        console.log('✅ TEST PASSED: Dev mode working');
+        console.log('Dev mode: Skipping OpenAI request');
+        // Use sample content for testing
+        const sampleContent = `SAMPLE LECTURE NOTES
+============================
+
+INTRODUCTION
+• This is a sample note for development
+• Testing formatting and layout
+
+CODE EXAMPLE:
+function sampleCode() {
+    console.log("Testing code blocks");
+}
+============
+
+SUMMARY
+• Testing bullet points
+• Checking formatting`;
+
+        // Handle different formats
+        switch (window.downloadFormat) {
+          case 'md':
+            downloadFile(sampleContent, `lecture_notes_${getTimestamp()}.md`, 'text/markdown');
+            break;
+          case 'pdf':
+            await generatePDF(sampleContent);
+            break;
+          default: // txt
+            downloadFile(formatSummary(sampleContent), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
+        }
+        console.log('✅ TEST PASSED: Sample content generated');
+        return;
+      }
+
       if (attempt > 1) {
         console.log(`Retrying... (${attempt}/${maxAttempts})`);
         await delay(delayMs);
@@ -205,8 +231,10 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
           downloadFile(formatSummary(content), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
       }
       
+      console.log('✅ TEST PASSED: Notes generated and downloaded successfully');
+      
     } catch (error) {
-      console.error('Error:', error.message);
+      console.error('❌ TEST FAILED:', error.message);
       if (attempt < maxAttempts) {
         return getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
       } else {
@@ -223,7 +251,7 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
       <html>
       <head>
         <title>Lecture Notes</title>
-        <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
         <style>
           @media print {
             @page {
@@ -233,149 +261,84 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
           }
           body {
             font-family: 'Inter', -apple-system, sans-serif;
-            line-height: 1.7;
+            line-height: 1.6;
             max-width: 800px;
             margin: 0 auto;
-            padding: 40px;
+            padding: 20px;
             color: #1a202c;
             font-size: 11pt;
-            background: #fff;
           }
           .header {
-            text-align: center;
-            margin-bottom: 50px;
-            padding: 30px;
-            background: #f8fafc;
-            border-radius: 12px;
-            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
           }
           .header h1 {
-            color: #1a202c;
-            font-size: 32pt;
+            font-size: 18pt;
             margin: 0;
-            font-weight: 900;
-            letter-spacing: -0.03em;
-            font-family: 'Merriweather', Georgia, serif;
+            font-weight: 600;
+            color: #1a202c;
           }
           .header .date {
             font-size: 11pt;
-            color: #64748b;
-            margin-top: 12px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-          }
-          section {
-            margin: 30px 0;
-            page-break-inside: avoid;
+            color: #4a5568;
+            margin-top: 8px;
           }
           h2 {
-            font-size: 18pt;
-            color: #1a202c;
-            margin: 35px 0 20px 0;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 10px;
-            font-weight: 900;
-            letter-spacing: -0.02em;
-            font-family: 'Merriweather', Georgia, serif;
-          }
-          h3 {
             font-size: 14pt;
             color: #1a202c;
             margin: 25px 0 15px 0;
-            font-weight: 700;
-            font-family: 'Merriweather', Georgia, serif;
+            font-weight: 600;
+          }
+          h4 {
+            font-size: 11pt;
+            color: #1a202c;
+            margin: 20px 0 10px 0;
+            font-weight: 600;
           }
           p {
-            margin: 12px 0;
-            text-align: justify;
-            hyphens: auto;
-            line-height: 1.8;
-          }
-          code {
-            font-family: 'Fira Code', monospace;
-            background: #f1f5f9;
-            padding: 3px 6px;
-            font-size: 10pt;
-            border-radius: 4px;
-            color: #0f766e;
-            font-weight: 500;
-            letter-spacing: -0.02em;
-          }
-          pre {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-            font-family: 'Fira Code', monospace;
-            font-size: 10pt;
+            margin: 8px 0;
             line-height: 1.6;
-            white-space: pre-wrap;
-            page-break-inside: avoid;
-            color: #1e293b;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
           }
-          ul, ol {
-            padding-left: 25px;
-            margin: 15px 0;
-          }
-          li {
-            margin: 10px 0;
-            text-align: justify;
-            line-height: 1.7;
-            padding-left: 5px;
-          }
-          .code-example {
-            margin: 30px 0;
-            page-break-inside: avoid;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 25px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-          }
-          .code-example h4 {
-            font-size: 12pt;
-            margin: 0 0 15px 0;
-            color: #475569;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            font-weight: 700;
-            font-family: 'Inter', sans-serif;
-          }
-          .separator {
-            border: none;
-            border-top: 2px solid #e2e8f0;
-            margin: 30px 0;
-          }
-          strong {
-            font-weight: 700;
-            color: #1a202c;
-          }
-          /* Bullet point styling */
           ul {
+            margin: 8px 0;
+            padding-left: 0;
             list-style: none;
           }
-          ul li::before {
+          li {
+            position: relative;
+            padding-left: 20px;
+            margin: 4px 0;
+            line-height: 1.6;
+          }
+          li::before {
             content: "•";
-            color: #3b82f6;
-            font-weight: bold;
-            display: inline-block;
-            width: 1em;
-            margin-left: -1em;
+            position: absolute;
+            left: 8px;
+            color: #1a202c;
+          }
+          code {
+            font-family: monospace;
+            font-size: 10pt;
+            color: #1a202c;
+          }
+          pre {
+            margin: 8px 0;
+            font-family: monospace;
+            font-size: 10pt;
+            line-height: 1.4;
+            white-space: pre-wrap;
+          }
+          .code-example {
+            margin: 15px 0;
+          }
+          .code-example h4 {
+            margin-bottom: 8px;
           }
         </style>
       </head>
       <body>
         <div class="header">
           <h1>Lecture Notes</h1>
-          <div class="date">${new Date().toLocaleDateString('en-US', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-          })}</div>
+          <div class="date">${new Date().toLocaleDateString()}</div>
         </div>
         ${formatSummaryForPDF(content)}
       </body>
@@ -398,40 +361,39 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
     let inCodeBlock = false;
     
     lines.forEach(line => {
-      // Handle section headers (lines with all caps and ====)
-      if (line.match(/^[A-Z][A-Z\s&:]+$/) && lines[lines.indexOf(line) + 1]?.includes('===')) {
+      // Handle section headers (all caps)
+      if (line.match(/^[A-Z][A-Z\s&:]+$/)) {
         formatted += `<h2>${line}</h2>`;
-        return;
-      }
-      
-      // Skip separator lines
-      if (line.match(/^=+$/)) {
         return;
       }
 
       // Handle code blocks
-      if (line.includes('CODE EXAMPLE:')) {
+      if (line.toLowerCase().includes('code example:') || line.toLowerCase().includes('example code:')) {
         formatted += '<div class="code-example"><h4>Code Example</h4>';
         inCodeBlock = true;
         return;
       }
 
       if (inCodeBlock) {
-        if (line.match(/^=+$/)) {
+        // End code block if we see a new section header or end marker
+        if (line.match(/^[A-Z][A-Z\s&:]+$/) || line.match(/^=+$/) || line.match(/^-+$/)) {
           formatted += '</div>';
           inCodeBlock = false;
-        } else {
-          formatted += `<pre><code>${line}</code></pre>`;
+          if (line.match(/^[A-Z][A-Z\s&:]+$/)) {
+            formatted += `<h2>${line}</h2>`;
+          }
+          return;
         }
+        formatted += `<pre><code>${line}</code></pre>`;
         return;
       }
 
-      // Handle bullet points
-      if (line.startsWith('• ')) {
+      // Handle bullet points (both • and - are common in OpenAI output)
+      if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
         if (!formatted.endsWith('</ul>')) {
           formatted += '<ul>';
         }
-        formatted += `<li>${line.substring(2)}</li>`;
+        formatted += `<li>${line.trim().substring(1).trim()}</li>`;
         return;
       }
       
@@ -441,10 +403,52 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
 
       // Regular text
       if (line.trim()) {
-        formatted += `<p>${line}</p>`;
+        // Skip separator lines
+        if (!line.match(/^[=\-]+$/)) {
+          formatted += `<p>${line}</p>`;
+        }
       }
     });
 
+    // Close any open lists
+    if (formatted.includes('<ul>') && !formatted.endsWith('</ul>')) {
+      formatted += '</ul>';
+    }
+
     return formatted;
   }
+
+  // Update processTranscript to handle both cases
+  function processTranscript() {
+    const transcriptPanel = document.querySelector('.transcript-panel');
+    if (!transcriptPanel) {
+      console.error('❌ TEST FAILED: Transcript panel not found');
+      return;
+    }
+
+    const transcriptLines = transcriptPanel.querySelectorAll('.transcript-cues p span');
+    if (!transcriptLines || transcriptLines.length === 0) {
+      console.error('❌ TEST FAILED: No transcript lines found in panel');
+      return;
+    }
+    
+    let fullText = '';
+    transcriptLines.forEach((line) => {
+      const text = line.textContent.trim();
+      if (text) {
+        fullText += text + ' ';
+      }
+    });
+
+    fullText = fullText.trim();
+    if (fullText) {
+      console.log('✅ TEST PASSED: Transcript extracted successfully');
+      getSummaryWithRetry(fullText, 1, 5000);
+    } else {
+      console.error('❌ TEST FAILED: No transcript text found in panel');
+    }
+  }
+
+  // Add test message for initial script load
+  console.log('✅ TEST PASSED: Content script loaded');
 })(); 

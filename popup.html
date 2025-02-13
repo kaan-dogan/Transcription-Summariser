@@ -85,6 +85,30 @@
     .status.success {
       color: #188038;
     }
+    .dev-mode {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e0e0e0;
+    }
+    .dev-mode label {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: #5f6368;
+      cursor: pointer;
+    }
+    .dev-mode input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    .dev-label {
+      background: #f1f3f4;
+      color: #1a73e8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      margin-left: 6px;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -106,6 +130,14 @@
     </div>
     <button id="generate">Generate Notes</button>
     <div id="status"></div>
+    
+    <div class="dev-mode">
+      <label>
+        <input type="checkbox" id="devMode">
+        Skip OpenAI Request
+        <span class="dev-label">Dev</span>
+      </label>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>

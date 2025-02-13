@@ -5,7 +5,8 @@
   "description": "Extracts transcript text from Echo360 lectures",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "*://*.echo360.org.uk/*",
