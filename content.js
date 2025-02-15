@@ -107,6 +107,74 @@
     return formatted;
   }
 
+  async function processChunks(chunks) {
+    try {
+      // Process chunks sequentially with retries
+      const results = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const result = await processChunk(chunks[i], i, chunks.length);
+        results.push(result);
+        console.log(`✅ Chunk ${i + 1}/${chunks.length} processed successfully`);
+      }
+      return results;
+    } catch (error) {
+      console.error('Chunk processing failed:', error);
+      throw error;
+    }
+  }
+
+  async function processChunk(chunk, index, totalChunks, retryCount = 0) {
+    const maxRetries = 3;
+    const retryDelay = 5000 * (retryCount + 1);
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': window.config.OPENAI_API_KEY
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-2024-07-18",
+          messages: [
+            {
+              role: "system",
+              content: `You are processing part ${index + 1} of ${totalChunks} of a lecture transcript. Create detailed notes that:
+1. Focus on technical details and implementation
+2. Include all code examples
+3. Maintain context from the chunk
+4. Use consistent formatting
+${index === 0 ? 'Start with an introduction.' : 'Continue from the previous section.'}
+${index === totalChunks - 1 ? 'Conclude the notes.' : 'Leave the section open for continuation.'}`
+            },
+            {
+              role: "user",
+              content: `Create detailed lecture notes from this transcript section. Include all technical details and code examples:\n\n${chunk}`
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content;
+
+    } catch (error) {
+      if (retryCount < maxRetries) {
+        console.log(`Retry ${retryCount + 1}/${maxRetries} for chunk ${index + 1}...`);
+        await delay(retryDelay);
+        return processChunk(chunk, index, totalChunks, retryCount + 1);
+      }
+      throw error;
+    }
+  }
+
+  // Update getSummaryWithRetry to use batch processing
   async function getSummaryWithRetry(text, attempt = 1, baseDelay = 5000) {
     const maxAttempts = 5;
     const delayMs = baseDelay * attempt;
@@ -153,82 +221,31 @@ SUMMARY
         await delay(delayMs);
       }
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': window.config.OPENAI_API_KEY
-        },
-        body: JSON.stringify({
-          model: "gpt-3.5-turbo-16k",
-          messages: [
-            {
-              role: "system",
-              content: `You are a thorough and meticulous student taking detailed lecture notes. Create extremely comprehensive notes that:
-
-1. IMPLEMENTATION & SYNTAX:
-   - Document exact syntax and method signatures
-   - Include complete code examples for each concept
-   - Note any specific implementation requirements or constraints
-   - Highlight constructor patterns and common methods
-
-2. PRACTICAL DETAILS:
-   - Record all advantages and disadvantages mentioned
-   - Note performance characteristics and complexity
-   - Document memory usage considerations
-   - List common use cases and scenarios
-
-3. EXAMPLES & APPLICATIONS:
-   - Provide detailed code examples for each concept
-   - Include real-world application scenarios
-   - Show different variations of usage
-   - Document edge cases and special situations
-
-4. BEST PRACTICES & WARNINGS:
-   - Note all tips and tricks mentioned
-   - Document common pitfalls and how to avoid them
-   - Include best practices for each concept
-   - Highlight any warnings or cautions
-
-5. COMPARISONS & ALTERNATIVES:
-   - Compare with similar data structures or approaches
-   - Note when to use one approach over another
-   - Document trade-offs between different approaches
-
-Format using clear sections with descriptive headers. Use code blocks for all examples. Include every technical detail mentioned by the lecturer. Make the notes as detailed as possible, assuming no prior knowledge.`
-            },
-            {
-              role: "user",
-              content: `Create extremely detailed lecture notes from this transcript. Include complete code examples, implementation details, and practical applications. Don't summarize - capture every technical detail mentioned:\n\n${text}`
-            }
-          ],
-          max_tokens: 2000,  // Increased for more detail
-          temperature: 0.2   // Reduced for more consistent output
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        if (response.status === 429 && attempt < maxAttempts) {
-          console.log('Rate limit hit, will retry...');
-          return getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
-        }
-        throw new Error(errorData.error?.message || 'API request failed');
+      // Split text into chunks
+      const chunkSize = 16000;
+      const chunks = [];
+      for (let i = 0; i < text.length; i += chunkSize) {
+        chunks.push(text.slice(i, i + chunkSize));
       }
 
-      const data = await response.json();
-      const content = data.choices[0].message.content;
+      console.log(`Processing ${chunks.length} chunks of transcript...`);
+
+      // Process all chunks in a single batch
+      const chunkResults = await processChunks(chunks);
+
+      // Combine the results
+      const combinedContent = await combineChunks(chunkResults);
 
       // Handle different formats
       switch (window.downloadFormat) {
         case 'md':
-          downloadFile(content, `lecture_notes_${getTimestamp()}.md`, 'text/markdown');
+          downloadFile(combinedContent, `lecture_notes_${getTimestamp()}.md`, 'text/markdown');
           break;
         case 'pdf':
-          await generatePDF(content);
+          await generatePDF(combinedContent);
           break;
         default: // txt
-          downloadFile(formatSummary(content), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
+          downloadFile(formatSummary(combinedContent), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
       }
       
       console.log('✅ TEST PASSED: Notes generated and downloaded successfully');
@@ -240,6 +257,48 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
       } else {
         console.error('Failed to generate notes after multiple attempts.');
       }
+    }
+  }
+
+  // Update combineChunks to use the same API endpoint
+  async function combineChunks(chunkResults) {
+    try {
+      const combinedText = chunkResults.join('\n\n');
+      
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': window.config.OPENAI_API_KEY
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-2024-07-18",
+          messages: [
+            {
+              role: "system",
+              content: "You are organizing and combining separate sections of lecture notes. Create a cohesive document that removes redundancy, ensures proper flow, and maintains all technical details and code examples."
+            },
+            {
+              role: "user",
+              content: `Combine these lecture note sections into a single cohesive document:\n\n${combinedText}`
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to combine chunks');
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content;
+
+    } catch (error) {
+      console.error('Error combining chunks:', error);
+      // If combination fails, return the simple concatenated version
+      return chunkResults.join('\n\n');
     }
   }
 
@@ -451,4 +510,22 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
 
   // Add test message for initial script load
   console.log('✅ TEST PASSED: Content script loaded');
+
+  // Check authentication before processing
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) {
+      // Open the external auth page in a new tab
+      window.open('https://your-domain.com/auth.html', '_blank');
+      return;
+    }
+    
+    // Continue with processing if user is authenticated
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'generateNotes') {
+        window.downloadFormat = request.format;
+        window.devMode = request.devMode;
+        processTranscript();
+      }
+    });
+  });
 })(); 

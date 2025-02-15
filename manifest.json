@@ -17,5 +17,9 @@
   },
   "background": {
     "service_worker": "background.js"
-  }
+  },
+  "web_accessible_resources": [{
+    "resources": ["login.html"],
+    "matches": ["<all_urls>"]
+  }]
 } 

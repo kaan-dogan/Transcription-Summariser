@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Transcript Extractor - Authentication</title>
+  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js"></script>
+  <script src="config.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .auth-container {
+      background: white;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 24px;
+    }
+    h1 {
+      color: #1a73e8;
+      font-size: 24px;
+      margin: 0 0 32px 0;
+    }
+    .input-group {
+      margin-bottom: 16px;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 16px;
+      margin-top: 8px;
+      box-sizing: border-box;
+    }
+    input:focus {
+      outline: none;
+      border-color: #1a73e8;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+    button:hover {
+      background: #1557b0;
+    }
+    .google-btn {
+      background: white;
+      color: #3c4043;
+      border: 1px solid #dadce0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .google-btn:hover {
+      background: #f8f9fa;
+    }
+    .error {
+      color: #d93025;
+      font-size: 14px;
+      margin-top: 16px;
+    }
+    .success {
+      color: #188038;
+      font-size: 14px;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="auth-container">
+    <img src="icon128.png" alt="Logo" class="logo">
+    <h1>Transcript Extractor</h1>
+    <div class="input-group">
+      <input type="email" id="email" placeholder="Email">
+    </div>
+    <div class="input-group">
+      <input type="password" id="password" placeholder="Password">
+    </div>
+    <button id="login">Log In</button>
+    <button id="signup">Sign Up</button>
+    <button id="google-signin" class="google-btn">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18">
+      Continue with Google
+    </button>
+    <div id="message"></div>
+  </div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const messageDiv = document.getElementById('message');
+
+      // Check if already authenticated
+      firebase.auth().onAuthStateChanged(user => {
+        if (user) {
+          messageDiv.textContent = 'Successfully authenticated!';
+          messageDiv.className = 'success';
+          // Close window after successful auth
+          setTimeout(() => {
+            window.close();
+          }, 1500);
+        }
+      });
+
+      document.getElementById('login').addEventListener('click', () => {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        firebase.auth().signInWithEmailAndPassword(email, password)
+          .catch(error => {
+            messageDiv.textContent = error.message;
+            messageDiv.className = 'error';
+          });
+      });
+
+      document.getElementById('signup').addEventListener('click', () => {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        firebase.auth().createUserWithEmailAndPassword(email, password)
+          .catch(error => {
+            messageDiv.textContent = error.message;
+            messageDiv.className = 'error';
+          });
+      });
+
+      document.getElementById('google-signin').addEventListener('click', () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        firebase.auth().signInWithPopup(provider)
+          .catch(error => {
+            messageDiv.textContent = error.message;
+            messageDiv.className = 'error';
+          });
+      });
+    });
+  </script>
+</body>
+</html> 
