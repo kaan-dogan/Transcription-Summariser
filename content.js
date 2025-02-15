@@ -107,6 +107,74 @@
     return formatted;
   }
 
+  async function processChunks(chunks) {
+    try {
+      // Process chunks sequentially with retries
+      const results = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const result = await processChunk(chunks[i], i, chunks.length);
+        results.push(result);
+        console.log(`✅ Chunk ${i + 1}/${chunks.length} processed successfully`);
+      }
+      return results;
+    } catch (error) {
+      console.error('Chunk processing failed:', error);
+      throw error;
+    }
+  }
+
+  async function processChunk(chunk, index, totalChunks, retryCount = 0) {
+    const maxRetries = 3;
+    const retryDelay = 5000 * (retryCount + 1);
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': window.config.OPENAI_API_KEY
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-2024-07-18",
+          messages: [
+            {
+              role: "system",
+              content: `You are processing part ${index + 1} of ${totalChunks} of a lecture transcript. Create detailed notes that:
+1. Focus on technical details and implementation
+2. Include all code examples
+3. Maintain context from the chunk
+4. Use consistent formatting
+${index === 0 ? 'Start with an introduction.' : 'Continue from the previous section.'}
+${index === totalChunks - 1 ? 'Conclude the notes.' : 'Leave the section open for continuation.'}`
+            },
+            {
+              role: "user",
+              content: `Create detailed lecture notes from this transcript section. Include all technical details and code examples:\n\n${chunk}`
+            }
+          ],
+          max_tokens: 2000,
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content;
+
+    } catch (error) {
+      if (retryCount < maxRetries) {
+        console.log(`Retry ${retryCount + 1}/${maxRetries} for chunk ${index + 1}...`);
+        await delay(retryDelay);
+        return processChunk(chunk, index, totalChunks, retryCount + 1);
+      }
+      throw error;
+    }
+  }
+
+  // Update getSummaryWithRetry to use batch processing
   async function getSummaryWithRetry(text, attempt = 1, baseDelay = 5000) {
     const maxAttempts = 5;
     const delayMs = baseDelay * attempt;
@@ -153,7 +221,7 @@ SUMMARY
         await delay(delayMs);
       }
 
-      // Split text into chunks of roughly 4000 tokens (approximately 16000 characters)
+      // Split text into chunks
       const chunkSize = 16000;
       const chunks = [];
       for (let i = 0; i < text.length; i += chunkSize) {
@@ -162,10 +230,8 @@ SUMMARY
 
       console.log(`Processing ${chunks.length} chunks of transcript...`);
 
-      // Process chunks in parallel with rate limiting
-      const chunkResults = await Promise.all(
-        chunks.map((chunk, index) => processChunk(chunk, index, chunks.length))
-      );
+      // Process all chunks in a single batch
+      const chunkResults = await processChunks(chunks);
 
       // Combine the results
       const combinedContent = await combineChunks(chunkResults);
@@ -194,66 +260,9 @@ SUMMARY
     }
   }
 
-  async function processChunk(chunk, index, totalChunks) {
-    const maxRetries = 3;
-    let retryCount = 0;
-
-    while (retryCount < maxRetries) {
-      try {
-        await delay(index * 1000); // Stagger requests to avoid rate limits
-        
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': window.config.OPENAI_API_KEY
-          },
-          body: JSON.stringify({
-            model: "GPT-4o-mini-2024-07-18",
-            messages: [
-              {
-                role: "system",
-                content: `You are processing part ${index + 1} of ${totalChunks} of a lecture transcript. Create detailed notes that:
-1. Focus on technical details and implementation
-2. Include all code examples
-3. Maintain context from the chunk
-4. Use consistent formatting
-${index === 0 ? 'Start with an introduction.' : 'Continue from the previous section.'}
-${index === totalChunks - 1 ? 'Conclude the notes.' : 'Leave the section open for continuation.'}`
-              },
-              {
-                role: "user",
-                content: `Create detailed lecture notes from this transcript section. Include all technical details and code examples:\n\n${chunk}`
-              }
-            ],
-            max_tokens: 2000,
-            temperature: 0.2
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`API request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log(`✅ Chunk ${index + 1}/${totalChunks} processed successfully`);
-        return data.choices[0].message.content;
-
-      } catch (error) {
-        retryCount++;
-        console.log(`Retry ${retryCount}/${maxRetries} for chunk ${index + 1}...`);
-        await delay(2000 * retryCount);
-        
-        if (retryCount === maxRetries) {
-          throw new Error(`Failed to process chunk ${index + 1} after ${maxRetries} retries`);
-        }
-      }
-    }
-  }
-
+  // Update combineChunks to use the same API endpoint
   async function combineChunks(chunkResults) {
     try {
-      // Combine the chunks and send for final processing
       const combinedText = chunkResults.join('\n\n');
       
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -263,7 +272,7 @@ ${index === totalChunks - 1 ? 'Conclude the notes.' : 'Leave the section open fo
           'Authorization': window.config.OPENAI_API_KEY
         },
         body: JSON.stringify({
-          model: "GPT-4o-mini-2024-07-18",
+          model: "gpt-4o-mini-2024-07-18",
           messages: [
             {
               role: "system",
