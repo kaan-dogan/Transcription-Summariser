@@ -28,6 +28,12 @@ chrome.runtime.onMessage.addListener((request, sender, callback) => {
     }).catch(error => {
       console.error('Background: Script injection failed:', error);
     });
+  } else if (request.action === 'openLoginPage') {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('login.html'),
+      active: true
+    });
+    return;
   }
   return true; // Keep the message channel open for async response
 });

@@ -510,4 +510,22 @@ SUMMARY
 
   // Add test message for initial script load
   console.log('✅ TEST PASSED: Content script loaded');
+
+  // Check authentication before processing
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) {
+      // Open the external auth page in a new tab
+      window.open('https://your-domain.com/auth.html', '_blank');
+      return;
+    }
+    
+    // Continue with processing if user is authenticated
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'generateNotes') {
+        window.downloadFormat = request.format;
+        window.devMode = request.devMode;
+        processTranscript();
+      }
+    });
+  });
 })(); 
