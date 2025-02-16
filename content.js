@@ -20,39 +20,9 @@
     return now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
   }
   
-  // Message listener
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'generateNotes') {
-      window.downloadFormat = request.format;
-      window.devMode = request.devMode;
-    }
-  });
-
   // Main functionality
   const transcriptButton = document.querySelector('a.transcript');
   
-  if (transcriptButton) {
-    // Check if transcript panel is visible using XPath
-    const transcriptPanel = document.evaluate(
-      '/html/body/div[1]/div[2]/div/div/div/div[1]/div/div/div/div/div[4]/div[2]',
-      document,
-      null,
-      XPathResult.FIRST_ORDERED_NODE_TYPE,
-      null
-    ).singleNodeValue;
-
-    if (transcriptPanel && window.getComputedStyle(transcriptPanel).display !== 'none') {
-      console.log('✅ TEST PASSED: Panel is visible, extracting transcript...');
-      processTranscript();
-    } else {
-      console.log('Opening transcript panel...');
-      transcriptButton.click();
-      setTimeout(processTranscript, 1500);
-    }
-  } else {
-    console.error('❌ TEST FAILED: Transcript button not found');
-  }
-
   async function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -107,6 +77,50 @@
     return formatted;
   }
 
+  async function processTranscript() {
+    console.log('Starting transcript processing...');
+    
+    // Wait for page to be fully loaded
+    if (document.readyState !== 'complete') {
+      await new Promise(resolve => window.addEventListener('load', resolve));
+    }
+
+    // Find and click transcript button if needed
+    const transcriptButton = document.querySelector('a.transcript');
+    if (!transcriptButton) {
+      console.error('❌ TEST FAILED: Transcript button not found');
+      return;
+    }
+
+    // Check if panel is already visible
+    const transcriptPanel = document.querySelector('.transcript-panel');
+    if (!transcriptPanel || window.getComputedStyle(transcriptPanel).display === 'none') {
+      console.log('Opening transcript panel...');
+      transcriptButton.click();
+      await delay(1500); // Wait for panel to open
+    }
+
+    // Get transcript lines after panel is open
+    const transcriptLines = document.querySelectorAll('.transcript-cues p span');
+    if (!transcriptLines || transcriptLines.length === 0) {
+      console.error('❌ TEST FAILED: No transcript lines found in panel');
+      return;
+    }
+
+    // Collect all text in one go
+    const fullText = Array.from(transcriptLines)
+      .map(line => line.textContent.trim())
+      .filter(text => text.length > 0)
+      .join(' ');
+
+    if (fullText) {
+      console.log('✅ TEST PASSED: Transcript extracted successfully');
+      await getSummaryWithRetry(fullText, 1, 5000);
+    } else {
+      console.error('❌ TEST FAILED: No transcript text found in panel');
+    }
+  }
+
   async function getSummaryWithRetry(text, attempt = 1, baseDelay = 5000) {
     const maxAttempts = 5;
     const delayMs = baseDelay * attempt;
@@ -149,9 +163,12 @@ SUMMARY
       }
 
       if (attempt > 1) {
-        console.log(`Retrying... (${attempt}/${maxAttempts})`);
+        console.log(`Retrying line... (${attempt}/${maxAttempts})`);
         await delay(delayMs);
       }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -159,8 +176,9 @@ SUMMARY
           'Content-Type': 'application/json',
           'Authorization': window.config.OPENAI_API_KEY
         },
+        signal: controller.signal,
         body: JSON.stringify({
-          model: "gpt-3.5-turbo-16k",
+          model: "gpt-4o-mini-2024-07-18",
           messages: [
             {
               role: "system",
@@ -202,23 +220,40 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
               content: `Create extremely detailed lecture notes from this transcript. Include complete code examples, implementation details, and practical applications. Don't summarize - capture every technical detail mentioned:\n\n${text}`
             }
           ],
-          max_tokens: 2000,  // Increased for more detail
-          temperature: 0.2   // Reduced for more consistent output
+          max_tokens: 16384,
+          temperature: 0.2
         })
-      });
+      }).finally(() => clearTimeout(timeout));
 
       if (!response.ok) {
         const errorData = await response.json();
-        if (response.status === 429 && attempt < maxAttempts) {
-          console.log('Rate limit hit, will retry...');
-          return getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
+        console.error('API Error:', errorData);
+        
+        // Handle specific error cases
+        if (response.status === 429) {
+          console.log('Rate limit hit, retrying...');
+          if (attempt < maxAttempts) {
+            return await getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
+          }
         }
+        
+        if (response.status === 503 || response.status === 502) {
+          console.log('Service temporarily unavailable, retrying...');
+          if (attempt < maxAttempts) {
+            return await getSummaryWithRetry(text, attempt + 1, baseDelay);
+          }
+        }
+        
         throw new Error(errorData.error?.message || 'API request failed');
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      if (!data.choices || !data.choices[0]) {
+        throw new Error('Invalid response format from API');
+      }
 
+      const content = data.choices[0].message.content;
+      
       // Handle different formats
       switch (window.downloadFormat) {
         case 'md':
@@ -234,11 +269,29 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
       console.log('✅ TEST PASSED: Notes generated and downloaded successfully');
       
     } catch (error) {
-      console.error('❌ TEST FAILED:', error.message);
+      console.error('❌ ERROR:', error.message);
+      
+      // Handle network errors
+      if (error.name === 'AbortError') {
+        console.log('Request timed out, retrying...');
+        if (attempt < maxAttempts) {
+          return await getSummaryWithRetry(text, attempt + 1, baseDelay);
+        }
+      }
+      
+      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        console.log('Network error, retrying...');
+        if (attempt < maxAttempts) {
+          return await getSummaryWithRetry(text, attempt + 1, baseDelay);
+        }
+      }
+
       if (attempt < maxAttempts) {
-        return getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
+        console.log(`Attempt ${attempt} failed, retrying...`);
+        return await getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
       } else {
         console.error('Failed to generate notes after multiple attempts.');
+        status.textContent = 'Failed to generate notes. Please try again.';
       }
     }
   }
@@ -418,36 +471,15 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
     return formatted;
   }
 
-  // Update processTranscript to handle both cases
-  function processTranscript() {
-    const transcriptPanel = document.querySelector('.transcript-panel');
-    if (!transcriptPanel) {
-      console.error('❌ TEST FAILED: Transcript panel not found');
-      return;
+  // Add single event listener
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'generateNotes') {
+      console.log('Received generateNotes request');
+      window.downloadFormat = request.format;
+      window.devMode = request.devMode;
+      processTranscript(); // Call once per message
     }
-
-    const transcriptLines = transcriptPanel.querySelectorAll('.transcript-cues p span');
-    if (!transcriptLines || transcriptLines.length === 0) {
-      console.error('❌ TEST FAILED: No transcript lines found in panel');
-      return;
-    }
-    
-    let fullText = '';
-    transcriptLines.forEach((line) => {
-      const text = line.textContent.trim();
-      if (text) {
-        fullText += text + ' ';
-      }
-    });
-
-    fullText = fullText.trim();
-    if (fullText) {
-      console.log('✅ TEST PASSED: Transcript extracted successfully');
-      getSummaryWithRetry(fullText, 1, 5000);
-    } else {
-      console.error('❌ TEST FAILED: No transcript text found in panel');
-    }
-  }
+  });
 
   // Add test message for initial script load
   console.log('✅ TEST PASSED: Content script loaded');
