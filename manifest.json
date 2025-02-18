@@ -18,8 +18,19 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [{
+    "matches": ["*://*.echo360.org.uk/*"],
+    "js": ["libs/jspdf.min.js", "pdf-generator.js", "content.js"],
+    "run_at": "document_end"
+  }],
   "web_accessible_resources": [{
-    "resources": ["login.html"],
+    "resources": [
+      "config.js",
+      "libs/jspdf.min.js"
+    ],
     "matches": ["<all_urls>"]
-  }]
+  }],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 } 

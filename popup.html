@@ -78,12 +78,16 @@
       margin-top: 12px;
       text-align: center;
       min-height: 16px;
+      padding: 8px;
+      border-radius: 4px;
     }
-    .status.error {
+    #status.error {
       color: #d93025;
+      background: #fce8e6;
     }
-    .status.success {
-      color: #188038;
+    #status.info {
+      color: #1a73e8;
+      background: #e8f0fe;
     }
     .dev-mode {
       margin-top: 12px;
@@ -137,6 +141,10 @@
         Skip OpenAI Request
         <span class="dev-label">Dev</span>
       </label>
+    </div>
+
+    <div id="error-message" style="display: none; color: #d93025; padding: 8px; margin-bottom: 12px; background: #fce8e6; border-radius: 4px; font-size: 12px;">
+      Please navigate to an Echo360 lecture page first
     </div>
   </div>
   <script src="popup.js"></script>

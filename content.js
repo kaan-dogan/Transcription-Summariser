@@ -2,6 +2,8 @@
 
 (function() {
   console.log('Content script starting execution');
+  console.log('Config available:', window.config);
+  console.log('API Key available:', window.config?.OPENAI_API_KEY);
   // Helper functions first
   function downloadFile(content, filename, type) {
     const blob = new Blob([content], { type: type });
@@ -30,25 +32,87 @@
   function formatSummary(content) {
     const lines = content.split('\n');
     let formatted = '';
-    let inList = false;
+    let inTable = false;
     let inCode = false;
 
+    // Helper function to format mathematical expressions
+    function formatMath(text) {
+      return text
+        // Format summation
+        .replace(/sum\((.*?)\)/, '∑($1)')
+        // Format theta
+        .replace(/theta/g, 'θ')
+        // Format multiplication
+        .replace(/\*/g, '×')
+        // Format subscripts
+        .replace(/\_(\d+)/g, '₍$1₎')
+        // Format superscripts
+        .replace(/\^(\d+)/g, '⁽$1⁾')
+        // Format greater than or equal
+        .replace(/>=/g, '≥')
+        // Format less than or equal
+        .replace(/<=/g, '≤')
+        // Format fractions
+        .replace(/(\d+)\/(\d+)/g, '⁽$1⁄$2⁾')
+        // Format vectors
+        .replace(/\\vec\{(.*?)\}/g, '⟨$1⟩');
+    }
+
+    // Helper function to format headings
+    function formatHeading(text) {
+      if (text.startsWith('###')) {
+        // Subsubheading - smaller, italic
+        return `<span style="color: #666; font-style: italic; font-size: 0.9em;">${text.replace(/^###\s*/, '')}</span>`;
+      } else if (text.startsWith('##')) {
+        // Subheading - medium, blue
+        return `<span style="color: #1a73e8; font-weight: bold;">${text.replace(/^##\s*/, '')}</span>`;
+      } else if (text.startsWith('#')) {
+        // Main heading - large, dark blue
+        return `<span style="color: #174ea6; font-weight: bold; font-size: 1.1em;">${text.replace(/^#\s*/, '')}</span>`;
+      }
+      return text;
+    }
+
     lines.forEach(line => {
-      // Remove markdown headers (##)
-      line = line.replace(/^#+\s*/, '');
-      
-      // Convert markdown lists to proper bullet points
-      line = line.replace(/^\s*-\s*/, '• ');
-      line = line.replace(/^\s*\*\s*/, '• ');
-      
-      // Handle code blocks
-      if (line.trim().startsWith('```')) {
-        inCode = !inCode;
-        if (inCode) {
-          formatted += '\nCODE EXAMPLE:\n' + '='.repeat(12) + '\n';
+      // Handle headings
+      if (line.startsWith('#')) {
+        formatted += formatHeading(line) + '\n\n';
+        return;
+      }
+
+      // Handle truth tables
+      if (line.includes('Inputs & Outputs:') || line.includes('Input (x1, x2)')) {
+        inTable = true;
+        formatted += '\n' + line + '\n';
+        return;
+      }
+
+      if (inTable) {
+        if (line.trim() === '') {
+          inTable = false;
+          formatted += '\n';
         } else {
-          formatted += '='.repeat(12) + '\n\n';
+          const cells = line.split('|').map(cell => cell.trim());
+          formatted += cells.join('\t') + '\n';
         }
+        return;
+      }
+
+      // Handle code blocks
+      if (line.toLowerCase().includes('python code for')) {
+        inCode = true;
+        formatted += '\n⬛ ' + line + '\n\n';
+        return;
+      }
+
+      if (line.trim().startsWith('```python')) {
+        formatted += 'python\n';
+        return;
+      }
+
+      if (line.trim() === '```') {
+        inCode = false;
+        formatted += '\n';
         return;
       }
 
@@ -56,19 +120,41 @@
         formatted += line + '\n';
         return;
       }
-      
-      // Add proper spacing between sections
-      if (line.trim().length > 0) {
-        if (line.match(/^[A-Z]/)) {  // If line starts with capital letter (likely a header)
-          formatted += '\n' + line.toUpperCase() + '\n' + '='.repeat(line.length) + '\n\n';
-        } else if (line.startsWith('• ')) {
-          inList = true;
-          formatted += line + '\n';
+
+      // Handle mathematical formulas
+      if (line.includes('f(z)') || line.includes('sum') || line.includes('theta')) {
+        formatted += formatMath(line) + '\n';
+        return;
+      }
+
+      // Handle section headers
+      if (line.match(/^\d+\.\d+/)) {
+        if (line.includes('(Not Linearly Separable)')) {
+          formatted += '\n❌ ' + line + '\n';
         } else {
-          if (inList) {
-            formatted += '\n';
-            inList = false;
-          }
+          formatted += '\n✅ ' + line + '\n';
+        }
+        return;
+      }
+
+      // Handle bullet points
+      if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
+        if (line.toLowerCase().includes('cannot')) {
+          formatted += '⚠️ ' + line.substring(1).trim() + '\n';
+        } else if (line.toLowerCase().startsWith('• why?')) {
+          formatted += '✅ ' + line.substring(1).trim() + '\n';
+        } else {
+          formatted += '✅ ' + line.substring(1).trim() + '\n';
+        }
+        return;
+      }
+
+      // Regular text
+      if (line.trim()) {
+        // Check if line contains mathematical expressions
+        if (line.match(/[+\-*/=><{}\[\]]/)) {
+          formatted += formatMath(line) + '\n';
+        } else {
           formatted += line + '\n';
         }
       }
@@ -78,46 +164,59 @@
   }
 
   async function processTranscript() {
-    console.log('Starting transcript processing...');
-    
-    // Wait for page to be fully loaded
-    if (document.readyState !== 'complete') {
-      await new Promise(resolve => window.addEventListener('load', resolve));
-    }
+    try {
+      console.log('Starting transcript processing...');
+      console.log('Current page URL:', window.location.href);
+      
+      // Wait for page to be fully loaded
+      if (document.readyState !== 'complete') {
+        console.log('Waiting for page to load...');
+        await new Promise(resolve => window.addEventListener('load', resolve));
+      }
 
-    // Find and click transcript button if needed
-    const transcriptButton = document.querySelector('a.transcript');
-    if (!transcriptButton) {
-      console.error('❌ TEST FAILED: Transcript button not found');
-      return;
-    }
+      // Find transcript button with more specific selector
+      const transcriptButton = document.querySelector('a.transcript, button.transcript');
+      console.log('Transcript button found:', !!transcriptButton);
+      console.log('Transcript button:', transcriptButton);
+      
+      if (!transcriptButton) {
+        throw new Error('Transcript button not found - Are you on an Echo360 lecture page?');
+      }
 
-    // Check if panel is already visible
-    const transcriptPanel = document.querySelector('.transcript-panel');
-    if (!transcriptPanel || window.getComputedStyle(transcriptPanel).display === 'none') {
-      console.log('Opening transcript panel...');
-      transcriptButton.click();
-      await delay(1500); // Wait for panel to open
-    }
+      // Check if panel is already visible
+      const transcriptPanel = document.querySelector('.transcript-panel');
+      console.log('Transcript panel found:', !!transcriptPanel);
+      console.log('Transcript panel display:', transcriptPanel ? window.getComputedStyle(transcriptPanel).display : 'N/A');
 
-    // Get transcript lines after panel is open
-    const transcriptLines = document.querySelectorAll('.transcript-cues p span');
-    if (!transcriptLines || transcriptLines.length === 0) {
-      console.error('❌ TEST FAILED: No transcript lines found in panel');
-      return;
-    }
+      if (!transcriptPanel || window.getComputedStyle(transcriptPanel).display === 'none') {
+        console.log('Opening transcript panel...');
+        transcriptButton.click();
+        await delay(1500); // Wait for panel to open
+      }
 
-    // Collect all text in one go
-    const fullText = Array.from(transcriptLines)
-      .map(line => line.textContent.trim())
-      .filter(text => text.length > 0)
-      .join(' ');
+      // Get transcript lines
+      const transcriptLines = document.querySelectorAll('.transcript-cues p span, .transcript-text');
+      console.log('Number of transcript lines found:', transcriptLines.length);
+      
+      if (!transcriptLines || transcriptLines.length === 0) {
+        throw new Error('No transcript found - Try refreshing the page');
+      }
 
-    if (fullText) {
-      console.log('✅ TEST PASSED: Transcript extracted successfully');
-      await getSummaryWithRetry(fullText, 1, 5000);
-    } else {
-      console.error('❌ TEST FAILED: No transcript text found in panel');
+      // Collect all text in one go
+      const fullText = Array.from(transcriptLines)
+        .map(line => line.textContent.trim())
+        .filter(text => text.length > 0)
+        .join(' ');
+
+      if (fullText) {
+        console.log('✅ TEST PASSED: Transcript extracted successfully');
+        await getSummaryWithRetry(fullText, 1, 5000);
+      } else {
+        console.error('❌ TEST FAILED: No transcript text found in panel');
+      }
+    } catch (error) {
+      console.error('Error processing transcript:', error);
+      alert(error.message || 'Failed to process transcript. See console for details.');
     }
   }
 
@@ -127,38 +226,32 @@
 
     try {
       if (window.devMode) {
-        console.log('✅ TEST PASSED: Dev mode working');
         console.log('Dev mode: Skipping OpenAI request');
-        // Use sample content for testing
-        const sampleContent = `SAMPLE LECTURE NOTES
-============================
+        const sampleContent = `# Lecture Notes
+## Overview
+• This is a sample note
+• Testing formatting
 
-INTRODUCTION
-• This is a sample note for development
-• Testing formatting and layout
+### Code Example
+\`\`\`python
+def example():
+    print("Hello")
+\`\`\`
 
-CODE EXAMPLE:
-function sampleCode() {
-    console.log("Testing code blocks");
-}
-============
+### Mathematical Formulas
+f(z) = sum(w_i * x_i) + theta
+`;
 
-SUMMARY
-• Testing bullet points
-• Checking formatting`;
-
-        // Handle different formats
         switch (window.downloadFormat) {
+          case 'pdf':
+            await generatePDF(formatSummary(sampleContent));
+            break;
           case 'md':
             downloadFile(sampleContent, `lecture_notes_${getTimestamp()}.md`, 'text/markdown');
-            break;
-          case 'pdf':
-            await generatePDF(sampleContent);
             break;
           default: // txt
             downloadFile(formatSummary(sampleContent), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
         }
-        console.log('✅ TEST PASSED: Sample content generated');
         return;
       }
 
@@ -174,7 +267,7 @@ SUMMARY
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': window.config.OPENAI_API_KEY
+          'Authorization': window.config?.OPENAI_API_KEY || 'Missing API Key'
         },
         signal: controller.signal,
         body: JSON.stringify({
@@ -223,28 +316,15 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
           max_tokens: 16384,
           temperature: 0.2
         })
-      }).finally(() => clearTimeout(timeout));
+      }).catch(error => {
+        console.error('Fetch error:', error);
+        throw new Error(`API request failed: ${error.message}`);
+      });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         console.error('API Error:', errorData);
-        
-        // Handle specific error cases
-        if (response.status === 429) {
-          console.log('Rate limit hit, retrying...');
-          if (attempt < maxAttempts) {
-            return await getSummaryWithRetry(text, attempt + 1, baseDelay * 1.5);
-          }
-        }
-        
-        if (response.status === 503 || response.status === 502) {
-          console.log('Service temporarily unavailable, retrying...');
-          if (attempt < maxAttempts) {
-            return await getSummaryWithRetry(text, attempt + 1, baseDelay);
-          }
-        }
-        
-        throw new Error(errorData.error?.message || 'API request failed');
+        throw new Error(`API returned ${response.status}: ${errorData.error?.message || 'Unknown error'}`);
       }
 
       const data = await response.json();
@@ -254,17 +334,11 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
 
       const content = data.choices[0].message.content;
       
-      // Handle different formats
-      switch (window.downloadFormat) {
-        case 'md':
-          downloadFile(content, `lecture_notes_${getTimestamp()}.md`, 'text/markdown');
-          break;
-        case 'pdf':
-          await generatePDF(content);
-          break;
-        default: // txt
-          downloadFile(formatSummary(content), `lecture_notes_${getTimestamp()}.txt`, 'text/plain');
-      }
+      // Format the content as LaTeX-style markdown
+      const formattedContent = formatAsLatex(content);
+      
+      // Generate PDF
+      await generatePDF(formattedContent);
       
       console.log('✅ TEST PASSED: Notes generated and downloaded successfully');
       
@@ -296,115 +370,240 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
     }
   }
 
+  function formatAsLatex(content) {
+    let formatted = '';
+    
+    // Add document preamble
+    formatted += `\\documentclass{article}
+\\usepackage{amsmath}
+\\usepackage{hyperref}
+\\usepackage{verbatim}
+\\usepackage[utf8]{inputenc}
+\\usepackage{graphicx}
+\\usepackage{forest}  % For tree structures
+
+\\begin{document}
+
+\\title{Lecture Notes}
+\\author{\\today}
+\\maketitle\n\n`;
+
+    // Process content sections
+    const lines = content.split('\n');
+    let inCodeBlock = false;
+    let inItemize = false;
+    let sectionNumber = 1;
+    let subsectionNumber = 1;
+
+    lines.forEach(line => {
+        const trimmedLine = line.trim();
+        
+        // Skip empty lines
+        if (!trimmedLine) {
+            formatted += '\n';
+            return;
+        }
+
+        // Handle code blocks
+        if (trimmedLine.startsWith('```')) {
+            if (!inCodeBlock) {
+                formatted += '\\begin{verbatim}\n';
+                inCodeBlock = true;
+                // Skip the language identifier line (e.g., ```python)
+                if (trimmedLine.length > 3) {
+                    return;
+                }
+            } else {
+                formatted += '\\end{verbatim}\n\n';
+                inCodeBlock = false;
+            }
+            return;
+        }
+
+        if (inCodeBlock) {
+            // Preserve exact code formatting, including indentation and whitespace
+            formatted += line + '\n';
+            return;
+        }
+
+        // Handle sections and subsections
+        if (trimmedLine.match(/^#{1,3}\s/)) {
+            const level = trimmedLine.match(/^(#{1,3})\s/)[1].length;
+            let text = trimmedLine.replace(/^#{1,3}\s/, '')  // Remove markdown headers
+                        .replace(/\*\*/g, '')         // Remove markdown bold
+                        .replace(/^\d+\.\s*/, '')     // Remove any numbering
+                        .trim();
+
+            // Convert emoji shortcuts
+            text = text.replace(/:[a-z_]+:/g, match => emojiMap[match] || match);
+
+            // Use proper LaTeX sectioning
+            switch (level) {
+                case 1:
+                    formatted += `\\section{${text}}\n\n`;
+                    break;
+                case 2:
+                    formatted += `\\subsection{${text}}\n\n`;
+                    break;
+                case 3:
+                    formatted += `\\subsubsection{${text}}\n\n`;
+                    break;
+            }
+            return;
+        }
+
+        // Handle bullet points
+        if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ') || trimmedLine.startsWith('•')) {
+            if (!inItemize) {
+                formatted += '\\begin{itemize}\n';
+                inItemize = true;
+            }
+            let text = trimmedLine.replace(/^[-*•]\s+/, '');
+            
+            // Convert markdown formatting to LaTeX
+            text = text.replace(/\*\*(.*?)\*\*/g, '\\textbf{$1}');
+            text = text.replace(/\*(.*?)\*/g, '\\textit{$1}');
+            text = text.replace(/:[a-z_]+:/g, match => emojiMap[match] || match);
+            
+            // Add proper indentation for LaTeX itemize
+            formatted += '    \\item ' + text + '\n';
+            return;
+        } else if (inItemize) {
+            formatted += '\\end{itemize}\n\n';
+            inItemize = false;
+        }
+
+        // Handle math blocks
+        if (trimmedLine.includes('$begin:math:display$')) {
+            formatted += '\\begin{align*}\n';
+            let math = trimmedLine.replace(/\$begin:math:display\$(.*?)\$end:math:display\$/g, '$1');
+            
+            // Clean up math notation
+            math = math
+                .replace(/\\\\/g, '\\\\\\\\')  // Fix line breaks in align*
+                .replace(/\\sum_/g, '\\sum\\limits_')  // Better sum notation
+                .replace(/\\cdot/g, '\\cdot ')  // Add space after multiplication
+                .replace(/\*/g, '\\cdot ')  // Convert * to proper multiplication
+                .replace(/theta/g, '\\theta')  // Proper theta symbol
+                .replace(/>=/g, '\\geq')  // Proper greater than or equal
+                .replace(/<=/g, '\\leq')  // Proper less than or equal
+                .replace(/\b(\d+)\/(\d+)\b/g, '\\frac{$1}{$2}')  // Proper fractions
+                .replace(/\bsin\b/g, '\\sin')  // Proper trig functions
+                .replace(/\bcos\b/g, '\\cos')
+                .replace(/\btan\b/g, '\\tan')
+                .replace(/\bexp\b/g, '\\exp')
+                .replace(/\blog\b/g, '\\log')
+                .replace(/\bln\b/g, '\\ln')
+                .replace(/\^(\w+)/g, '^{$1}')  // Proper superscripts
+                .replace(/_(\w+)/g, '_{$1}');  // Proper subscripts
+            
+            formatted += math + '\n\\end{align*}\n\n';
+            return;
+        }
+
+        if (trimmedLine.includes('$begin:math:text$')) {
+            let math = trimmedLine.replace(/\$begin:math:text\$(.*?)\$end:math:text\$/g, '$1');
+            
+            // Clean up inline math notation
+            math = math
+                .replace(/\*/g, '\\cdot ')
+                .replace(/theta/g, '\\theta')
+                .replace(/>=/g, '\\geq')
+                .replace(/<=/g, '\\leq')
+                .replace(/\b(\d+)\/(\d+)\b/g, '\\frac{$1}{$2}')
+                .replace(/\bsin\b/g, '\\sin')
+                .replace(/\bcos\b/g, '\\cos')
+                .replace(/\btan\b/g, '\\tan')
+                .replace(/\bexp\b/g, '\\exp')
+                .replace(/\blog\b/g, '\\log')
+                .replace(/\bln\b/g, '\\ln')
+                .replace(/\^(\w+)/g, '^{$1}')
+                .replace(/_(\w+)/g, '_{$1}');
+            
+            formatted += `$${math}$`;
+            return;
+        }
+
+        // Handle tree structures
+        if (trimmedLine.startsWith('tree:')) {
+            formatted += '\\begin{forest}\n  for tree={draw,\n    parent anchor=south,\n    child anchor=north,\n    align=center}\n';
+            
+            // Remove the 'tree:' prefix and split into lines
+            const treeLines = trimmedLine.substring(5).trim().split('\n');
+            let lastIndentLevel = 0;
+            let brackets = [];
+            
+            treeLines.forEach((line, index) => {
+                const indentLevel = line.match(/^\s*/)[0].length;
+                const node = line.trim();
+                
+                // Handle indentation changes
+                if (indentLevel > lastIndentLevel) {
+                    // Going deeper - open new branch
+                    formatted += '    '.repeat(lastIndentLevel) + '[' + node + '\n';
+                    brackets.push(']');
+                } else if (indentLevel < lastIndentLevel) {
+                    // Going back - close branches
+                    const levelsToClose = (lastIndentLevel - indentLevel);
+                    formatted += '    '.repeat(lastIndentLevel) + 
+                                brackets.splice(-levelsToClose).join('\n' + '    '.repeat(indentLevel)) + 
+                                '\n' + '    '.repeat(indentLevel) + '[' + node + '\n';
+                    brackets.push(']');
+                } else {
+                    // Same level - close previous node and start new one
+                    if (index > 0) {
+                        formatted += '    '.repeat(indentLevel) + brackets.pop() + '\n';
+                    }
+                    formatted += '    '.repeat(indentLevel) + '[' + node + '\n';
+                    brackets.push(']');
+                }
+                
+                lastIndentLevel = indentLevel;
+            });
+            
+            // Close any remaining brackets
+            while (brackets.length > 0) {
+                const level = brackets.length - 1;
+                formatted += '    '.repeat(level) + brackets.pop() + '\n';
+            }
+            
+            formatted += '\\end{forest}\n\n';
+            return;
+        }
+
+        // Handle regular text
+        let text = trimmedLine;
+        text = text.replace(/\*\*(.*?)\*\*/g, '\\textbf{$1}');
+        text = text.replace(/\*(.*?)\*/g, '\\textit{$1}');
+        text = text.replace(/:[a-z_]+:/g, match => emojiMap[match] || match);
+        formatted += text + '\n';
+    });
+
+    // Close any open environments
+    if (inItemize) {
+        formatted += '\\end{itemize}\n';
+    }
+
+    formatted += '\\end{document}';
+    return formatted;
+  }
+
   // Add this function to handle PDF generation
   async function generatePDF(content) {
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Lecture Notes</title>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
-        <style>
-          @media print {
-            @page {
-              margin: 1in;
-              size: A4;
-            }
-          }
-          body {
-            font-family: 'Inter', -apple-system, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #1a202c;
-            font-size: 11pt;
-          }
-          .header {
-            margin-bottom: 30px;
-          }
-          .header h1 {
-            font-size: 18pt;
-            margin: 0;
-            font-weight: 600;
-            color: #1a202c;
-          }
-          .header .date {
-            font-size: 11pt;
-            color: #4a5568;
-            margin-top: 8px;
-          }
-          h2 {
-            font-size: 14pt;
-            color: #1a202c;
-            margin: 25px 0 15px 0;
-            font-weight: 600;
-          }
-          h4 {
-            font-size: 11pt;
-            color: #1a202c;
-            margin: 20px 0 10px 0;
-            font-weight: 600;
-          }
-          p {
-            margin: 8px 0;
-            line-height: 1.6;
-          }
-          ul {
-            margin: 8px 0;
-            padding-left: 0;
-            list-style: none;
-          }
-          li {
-            position: relative;
-            padding-left: 20px;
-            margin: 4px 0;
-            line-height: 1.6;
-          }
-          li::before {
-            content: "•";
-            position: absolute;
-            left: 8px;
-            color: #1a202c;
-          }
-          code {
-            font-family: monospace;
-            font-size: 10pt;
-            color: #1a202c;
-          }
-          pre {
-            margin: 8px 0;
-            font-family: monospace;
-            font-size: 10pt;
-            line-height: 1.4;
-            white-space: pre-wrap;
-          }
-          .code-example {
-            margin: 15px 0;
-          }
-          .code-example h4 {
-            margin-bottom: 8px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>Lecture Notes</h1>
-          <div class="date">${new Date().toLocaleDateString()}</div>
-        </div>
-        ${formatSummaryForPDF(content)}
-      </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.onload = function() {
-      printWindow.print();
-      printWindow.onafterprint = function() {
-        printWindow.close();
-      };
-    };
+    try {
+      if (typeof window.generatePDF !== 'function') {
+        throw new Error('PDF generator not loaded');
+      }
+      
+      // Add a small delay to ensure jsPDF is fully initialized
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await window.generatePDF(content);
+      console.log('✅ PDF generated successfully');
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. See console for details.');
+    }
   }
 
   // Add this new formatting function specifically for PDF
@@ -471,10 +670,12 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
     return formatted;
   }
 
-  // Add single event listener
+  // Add debug logging to the message listener
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('Content script received message:', request);
     if (request.action === 'generateNotes') {
-      console.log('Received generateNotes request');
+      console.log('Received generateNotes request with format:', request.format);
+      console.log('Dev mode:', request.devMode);
       window.downloadFormat = request.format;
       window.devMode = request.devMode;
       processTranscript(); // Call once per message
@@ -483,22 +684,4 @@ Format using clear sections with descriptive headers. Use code blocks for all ex
 
   // Add test message for initial script load
   console.log('✅ TEST PASSED: Content script loaded');
-
-  // Check authentication before processing
-  firebase.auth().onAuthStateChanged(user => {
-    if (!user) {
-      // Open the external auth page in a new tab
-      window.open('https://your-domain.com/auth.html', '_blank');
-      return;
-    }
-    
-    // Continue with processing if user is authenticated
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'generateNotes') {
-        window.downloadFormat = request.format;
-        window.devMode = request.devMode;
-        processTranscript();
-      }
-    });
-  });
 })(); 
