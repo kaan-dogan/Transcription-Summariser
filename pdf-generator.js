@@ -28,11 +28,15 @@ function convertToLaTeX(content) {
             if (!inCodeBlock) {
                 latex += '\\begin{verbatim}\n';
                 inCodeBlock = true;
+                // Skip the language identifier line (e.g., ```python)
+                if (trimmedLine.length > 3) {
+                    return;
+                }
             } else {
                 latex += '\\end{verbatim}\n\n';
                 inCodeBlock = false;
             }
-            continue;
+            return;
         }
 
         if (inCodeBlock) {
@@ -81,24 +85,6 @@ function convertToLaTeX(content) {
         } else if (inItemize) {
             latex += '\\end{itemize}\n\n';
             inItemize = false;
-        }
-
-        // Handle math blocks
-        if (line.includes('$begin:math:display$')) {
-            latex += '\\begin{align*}\n';
-            let math = line.replace(/\$begin:math:display\$(.*?)\$end:math:display\$/g, '$1');
-            math = math
-                .replace(/\\\\/g, '\\\\\\\\')
-                .replace(/\\sum_/g, '\\sum\\limits_')
-                .replace(/\\cdot/g, '\\cdot ')
-                .replace(/\*/g, '\\cdot ')
-                .replace(/theta/g, '\\theta')
-                .replace(/>=/g, '\\geq')
-                .replace(/<=/g, '\\leq')
-                .replace(/\b(\d+)\/(\d+)\b/g, '\\frac{$1}{$2}');
-            
-            latex += math + '\n\\end{align*}\n\n';
-            continue;
         }
 
         // Handle regular text
@@ -226,29 +212,6 @@ window.generatePDF = async function(content) {
                 continue;
             }
 
-            // Handle verbatim (code blocks)
-            if (line.startsWith('\\begin{verbatim}')) {
-                inCodeBlock = true;
-                doc.setFont('courier', 'normal');
-                doc.setFontSize(9);
-                y += lineHeight;
-                continue;
-            }
-
-            if (line.startsWith('\\end{verbatim}')) {
-                inCodeBlock = false;
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(11);
-                y += lineHeight;
-                continue;
-            }
-
-            if (inCodeBlock) {
-                doc.text(line, margin + 5, y);
-                y += lineHeight;
-                continue;
-            }
-
             // Handle regular text
             if (line.trim()) {
                 doc.setFontSize(11);
@@ -309,4 +272,4 @@ const emojiMap = {
     ':computer:': '💻',
     ':chart:': '📊',
     ':diamond:': '🔹'
-}; 
+};
